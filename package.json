@@ -1,0 +1,22 @@
+{
+  "name": "googlephoto-backup-app",
+  "version": "1.0.0",
+  "description": "Google Photos backup tool via API",
+  "private": true,
+  "license": "Apache-2.0",
+  "author": "quo1987",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/googlesamples/google-photos.git"
+  },
+  "main": "app.js",
+  "dependencies": {
+    "body-parser": "^1.18.3",
+    "express": "^4.16.4",
+    "npm": "^6.7.0",
+    "piexifjs": "^1.0.5",
+    "request": "^2.88.0",
+    "request-promise": "^4.2.2",
+    "winston": "^3.1.0"
+  }
+}

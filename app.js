@@ -1,0 +1,184 @@
+const fs = require('fs')
+const request = require('request-promise')
+const path = require('path')
+const piexif = require('piexifjs');
+const winston = require('winston');
+const logger = winston.createLogger({
+    format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.printf(({level,message,label,timestamp})=>{
+            return `${timestamp}[${level}] ${message}`;
+        })
+    ),
+    transports: [
+        new winston.transports.Console(),
+        new winston.transports.File({filename: 'backup.log'})
+    ]
+});
+
+const config = require('./config');
+
+// Exifデータの挿入
+// metadata:Google Photos APIから取得したMediaItemのmedaData.Photo
+// jpeg_data: 対象画像のbufferデータ
+const insertExif = (metadata,jpeg_data) =>{
+    const zeroth = {};
+    const exif = {};
+    const gps = {};
+    if(metadata.photo.cameraMake) zeroth[piexif.ImageIFD.Make] = metadata.photo.cameraMake;
+    if(metadata.photo.cameraModel) zeroth[piexif.ImageIFD.Model] = metadata.photo.cameraModel;
+    if(metadata.width) zeroth[piexif.ImageIFD.ImageWidth] = Number(metadata.width);
+    if(metadata.height) zeroth[piexif.ImageIFD.ImageLength] = Number(metadata.height);
+    if(metadata.photo.focalLength) exif[piexif.ExifIFD.FocalLength] = metadata.photo.focalLength;
+    if(metadata.photo.apertureFNumber) exif[piexif.ExifIFD.FNumber] = metadata.photo.apertureFNumber;
+    if(metadata.photo.isoEquivalent) exif[piexif.ExifIFD.ISOSpeedRatings] = metadata.photo.isoEquivalent;
+    if(metadata.photo.exposureTime) exif[piexif.ExifIFD.ExposureTime] = metadata.photo.exposureTime;
+    const creationTime = new Date(metadata.creationTime);
+    const year = creationTime.getFullYear();
+    const month = creationTime.getMonth() < 9 ? `0${creationTime.getMonth()+1}`:str(creationTime.getMonth()+1);
+    const date = creationTime.getDate() < 10 ? `0${creationTime.getDate()}`:creationTime.getDate();
+    const hour = creationTime.getHours() < 10 ? `0${creationTime.getHours()}`:creationTime.getHours();
+    const minute = creationTime.getMinutes() < 10 ? `0${creationTime.getMinutes()}`:creationTime.getMinutes();
+    const second = creationTime.getSeconds() < 10 ? `0${creationTime.getSeconds()}`:creationTime.getSeconds();
+    exif[piexif.ExifIFD.DateTimeOriginal] = `${year}:${month}:${date} ${hour}:${minute}:${second}`;
+
+    const exifObj = {"0th":zeroth,"Exif":exif};
+    const exifStr = piexif.dump(exifObj);
+
+    return new Buffer(piexif.insert(exifStr,jpeg_data.toString('binary')), 'binary');
+}
+
+// 取得済みのaccess_tokenをリフレッシュする
+const refreshToken = async ()=>{
+    if(Date.now() >= credential.expires) {
+        logger.info('token refresh');
+        try {
+            const res = await request.post(config.oauthEndpoint+"/token",{
+                headers:{'Content-Type': 'application/json'},
+                json: {
+                    client_id: config.oAuthClientID,
+                    client_secret: config.oAuthclientSecret,
+                    refresh_token: credential.refreshToken,
+                    grant_type: 'refresh_token'
+                }
+            })
+            credential.token = res.access_token;
+            credential.expires = Date.now() + (res.expires_in * 10);
+            fs.writeFileSync('credential',JSON.stringify(credential));
+            logger.info(JSON.stringify(credential));
+        } catch(err) {
+            logger.error(err.message)
+        }
+    }
+}
+
+// backup本体
+// dir:画像取得先のディレクトリ
+const backup = async (dir)=>{
+    // credentialが無ければ終了
+    if(!credential || !credential.token || !credential.refreshToken || !credential.expires) {
+        logger.error('credential is not set');
+        return;
+    }
+
+    await refreshToken();
+    try {
+        const album = await request.get(`${config.apiEndpoint}/v1/albums/${config.backupAlbumId}`,{
+            headers: {'Content-Type': 'application/json'},
+            json: true,
+            auth: {'bearer':credential.token}
+        });
+        const item_count = Number(album.mediaItemsCount);
+        const iterate = Math.ceil(item_count/config.searchPageSize);
+        let next_page_token = '';
+
+        // 対象アルバムの全画像を100件ずつ取得する
+        for(let i=0; i<iterate; i++) {
+            await refreshToken();
+            logger.info(`iterate:${(i+1)}/${iterate}`);
+            const parameter = {albumId:config.backupAlbumId, pageSize:config.searchPageSize};
+            if(next_page_token) {
+                parameter.pageToken = next_page_token;
+            }
+            const items = await request.post(`${config.apiEndpoint}/v1/mediaItems:search`,{
+                headers: {'Content-Type': 'application/json'},
+                json: parameter,
+                auth: {'bearer':credential.token}
+            });
+            if(items && items.mediaItems) {
+                const downloadAsyncJob = [];
+
+                items.mediaItems.forEach((media_item)=>{
+                    const mimetype = media_item.mimeType.toLowerCase();
+                    // 対象MIMETYPEに一致するメディアのみ取得処理を行う
+                    if(config.backupMimeType.indexOf(mimetype) >= 0) {
+
+                        // 全ての並列ダウンロード完了確認のためPromiseオブジェクトを配列に格納する
+                        const job = new Promise((resolve,reject)=>{
+                            // ファイル名はid+元々のファイルの拡張子とする
+                            const filename = media_item.id + media_item.filename.substring(media_item.filename.lastIndexOf('.'));
+                            const saveFile = path.join(dir,filename);
+                            fs.stat(saveFile,(err,stat)=>{
+                                if(!stat) {
+                                    //ファイルが存在しなければダウンロード処理を開始する
+                                    const metadata = media_item.mediaMetadata;
+                                    const rawdataUrl = `${media_item.baseUrl}=w${metadata.width}-h${metadata.height}`
+                                    logger.info(`download:${filename} from ${rawdataUrl}`)
+
+                                    request({url:rawdataUrl,encoding: null,method: 'GET'},(err,res,body)=>{
+                                        if(err) {
+                                            logger.error('file request error');
+                                            logger.error(err);
+                                            reject();
+                                        }
+                                        // rawdataからはExif情報が含まれないためJPEGであればAPIから取得したメタデータをよりExif情報を設定する
+                                        const data = mimetype === 'image/jpeg' ? insertExif(metadata,body) : body;
+                                        fs.writeFile(saveFile,data,{encoding:'buffer'},(err)=>{
+                                            if(err) {
+                                                logger.error('file write error');
+                                                logger.error(err);
+                                                fs.unlink(saveFile);
+                                                reject();
+                                            }
+                                            resolve();
+                                        });
+                                    });
+                                } else {
+                                    //ファイルが既に存在していれば完了
+                                    resolve();
+                                }
+                            });
+                        });
+                        downloadAsyncJob.push(job);
+                    }
+                });
+
+                // 1リクエスト最大100回の並列ダウンロードが終わるまで待機
+                await Promise.all(downloadAsyncJob);
+                next_page_token = items.nextPageToken;
+            }
+            await new Promise((resolve,reject)=>{
+                setTimeout(()=>{
+                    resolve();
+                },1000)
+            })
+        }
+    } catch (err) {
+        logger.error(err.message);
+    }
+}
+
+logger.info("start backup");
+
+// 画像の保存先ディレクトリ
+const target_directory = process.argv[2];
+
+// 保存したaccess_token、refresh_token、expiresを読み出す
+const credential = JSON.parse(fs.readFileSync('credential'));
+if(!target_directory) {
+    logger.error('backup directory is not set');
+} else {
+    backup(target_directory).then(()=>{
+        logger.info("done");
+    });
+}
