@@ -1,3 +1,16 @@
+// Copyright 2019 quotto
+
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 const fs = require('fs');
 const request = require('request-promise');
@@ -25,7 +38,7 @@ app.get('/auth/google/callback',(req,res)=>{
             const authenticate_data = {
                 token: data.access_token,
                 refreshToken: data.refresh_token,
-                expires: Date.now() + (data.expires_in * 10)
+                expires: Date.now() + (data.expires_in * 1000)
             }
             fs.writeSync(fd,JSON.stringify(authenticate_data)) ;
             console.log('Oauth process succeed.');

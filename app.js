@@ -1,3 +1,16 @@
+// Copyright 2019 quotto
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 const fs = require('fs')
 const request = require('request-promise')
 const path = require('path')
@@ -63,7 +76,7 @@ const refreshToken = async ()=>{
                 }
             })
             credential.token = res.access_token;
-            credential.expires = Date.now() + (res.expires_in * 10);
+            credential.expires = Date.now() + (res.expires_in * 1000);
             fs.writeFileSync('credential',JSON.stringify(credential));
             logger.info(JSON.stringify(credential));
         } catch(err) {
@@ -72,9 +85,48 @@ const refreshToken = async ()=>{
     }
 }
 
+// 画像データのダウンロード処理
+// media_item:MediaItemオブジェクト
+const downloadImage = (media_item)=>{
+    return new Promise((resolve,reject)=>{
+        // ファイル名はid+元々のファイルの拡張子とする
+        const filename = media_item.id + media_item.filename.substring(media_item.filename.lastIndexOf('.'));
+        const saveFile = path.join(config.backupDir,filename);
+        fs.stat(saveFile,(err,stat)=>{
+            if(!stat) {
+                //ファイルが存在しなければダウンロード処理を開始する
+                const metadata = media_item.mediaMetadata;
+                const rawdataUrl = `${media_item.baseUrl}=w${metadata.width}-h${metadata.height}`
+                logger.info(`download:${filename} from ${rawdataUrl}`)
+
+                request({url:rawdataUrl,encoding: null,method: 'GET'},(err,res,body)=>{
+                    if(err) {
+                        logger.error('file request error');
+                        logger.error(err);
+                        reject();
+                    }
+                    // rawdataからはExif情報が含まれないためJPEGであればAPIから取得したメタデータをよりExif情報を設定する
+                    const data = media_item.mimeType.toLowerCase() === 'image/jpeg' ? insertExif(metadata,body) : body;
+                    fs.writeFile(saveFile,data,{encoding:'buffer'},(err)=>{
+                        if(err) {
+                            logger.error('file write error');
+                            logger.error(err);
+                            fs.unlink(saveFile);
+                            reject();
+                        }
+                        resolve();
+                    });
+                });
+            } else {
+                //ファイルが既に存在すれば何もせず完了
+                resolve();
+            }
+        });
+    });
+}
+
 // backup本体
-// dir:画像取得先のディレクトリ
-const backup = async (dir)=>{
+const backup = async ()=>{
     // credentialが無ければ終了
     if(!credential || !credential.token || !credential.refreshToken || !credential.expires) {
         logger.error('credential is not set');
@@ -105,51 +157,14 @@ const backup = async (dir)=>{
                 json: parameter,
                 auth: {'bearer':credential.token}
             });
+
             if(items && items.mediaItems) {
                 const downloadAsyncJob = [];
 
                 items.mediaItems.forEach((media_item)=>{
-                    const mimetype = media_item.mimeType.toLowerCase();
-                    // 対象MIMETYPEに一致するメディアのみ取得処理を行う
-                    if(config.backupMimeType.indexOf(mimetype) >= 0) {
-
-                        // 全ての並列ダウンロード完了確認のためPromiseオブジェクトを配列に格納する
-                        const job = new Promise((resolve,reject)=>{
-                            // ファイル名はid+元々のファイルの拡張子とする
-                            const filename = media_item.id + media_item.filename.substring(media_item.filename.lastIndexOf('.'));
-                            const saveFile = path.join(dir,filename);
-                            fs.stat(saveFile,(err,stat)=>{
-                                if(!stat) {
-                                    //ファイルが存在しなければダウンロード処理を開始する
-                                    const metadata = media_item.mediaMetadata;
-                                    const rawdataUrl = `${media_item.baseUrl}=w${metadata.width}-h${metadata.height}`
-                                    logger.info(`download:${filename} from ${rawdataUrl}`)
-
-                                    request({url:rawdataUrl,encoding: null,method: 'GET'},(err,res,body)=>{
-                                        if(err) {
-                                            logger.error('file request error');
-                                            logger.error(err);
-                                            reject();
-                                        }
-                                        // rawdataからはExif情報が含まれないためJPEGであればAPIから取得したメタデータをよりExif情報を設定する
-                                        const data = mimetype === 'image/jpeg' ? insertExif(metadata,body) : body;
-                                        fs.writeFile(saveFile,data,{encoding:'buffer'},(err)=>{
-                                            if(err) {
-                                                logger.error('file write error');
-                                                logger.error(err);
-                                                fs.unlink(saveFile);
-                                                reject();
-                                            }
-                                            resolve();
-                                        });
-                                    });
-                                } else {
-                                    //ファイルが既に存在していれば完了
-                                    resolve();
-                                }
-                            });
-                        });
-                        downloadAsyncJob.push(job);
+                    // 対象のMIMETYPEに一致するメディアのみダウンロード処理実行
+                    if(config.backupMimeType.indexOf(media_item.mimeType.toLowerCase()) >= 0) {
+                        downloadAsyncJob.push(downloadImage(media_item));
                     }
                 });
 
@@ -170,15 +185,8 @@ const backup = async (dir)=>{
 
 logger.info("start backup");
 
-// 画像の保存先ディレクトリ
-const target_directory = process.argv[2];
-
 // 保存したaccess_token、refresh_token、expiresを読み出す
 const credential = JSON.parse(fs.readFileSync('credential'));
-if(!target_directory) {
-    logger.error('backup directory is not set');
-} else {
-    backup(target_directory).then(()=>{
-        logger.info("done");
-    });
-}
+backup().then(()=>{
+    logger.info("done");
+});
