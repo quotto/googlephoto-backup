@@ -4,7 +4,7 @@
   "description": "Google Photos backup tool via API",
   "private": true,
   "license": "Apache-2.0",
-  "author": "quo1987",
+  "author": "quotto",
   "repository": {
     "type": "git",
     "url": "https://github.com/googlesamples/google-photos.git"
