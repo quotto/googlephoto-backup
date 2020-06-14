@@ -50,7 +50,7 @@ const insertExif = (metadata,jpeg_data) =>{
     if(metadata.photo.exposureTime) exifObj["Exif"][piexif.ExifIFD.ExposureTime] = metadata.photo.exposureTime;
     const creationTime = new Date(metadata.creationTime);
     const year = creationTime.getFullYear();
-    const month = creationTime.getMonth() < 9 ? `0${creationTime.getMonth()+1}`:str(creationTime.getMonth()+1);
+    const month = creationTime.getMonth() < 9 ? `0${creationTime.getMonth()+1}`:String(creationTime.getMonth()+1);
     const date = creationTime.getDate() < 10 ? `0${creationTime.getDate()}`:creationTime.getDate();
     const hour = creationTime.getHours() < 10 ? `0${creationTime.getHours()}`:creationTime.getHours();
     const minute = creationTime.getMinutes() < 10 ? `0${creationTime.getMinutes()}`:creationTime.getMinutes();
