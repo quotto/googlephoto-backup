@@ -35,17 +35,19 @@ const config = require('./config');
 // metadata:Google Photos APIから取得したMediaItemのmedaData.Photo
 // jpeg_data: 対象画像のbufferデータ
 const insertExif = (metadata,jpeg_data) =>{
+    const exifObj = piexif.load(jpeg_data.toString('binary'));
     const zeroth = {};
     const exif = {};
     const gps = {};
-    if(metadata.photo.cameraMake) zeroth[piexif.ImageIFD.Make] = metadata.photo.cameraMake;
-    if(metadata.photo.cameraModel) zeroth[piexif.ImageIFD.Model] = metadata.photo.cameraModel;
-    if(metadata.width) zeroth[piexif.ImageIFD.ImageWidth] = Number(metadata.width);
-    if(metadata.height) zeroth[piexif.ImageIFD.ImageLength] = Number(metadata.height);
-    if(metadata.photo.focalLength) exif[piexif.ExifIFD.FocalLength] = metadata.photo.focalLength;
-    if(metadata.photo.apertureFNumber) exif[piexif.ExifIFD.FNumber] = metadata.photo.apertureFNumber;
-    if(metadata.photo.isoEquivalent) exif[piexif.ExifIFD.ISOSpeedRatings] = metadata.photo.isoEquivalent;
-    if(metadata.photo.exposureTime) exif[piexif.ExifIFD.ExposureTime] = metadata.photo.exposureTime;
+    if(metadata.photo.cameraMake) exifObj["0th"][piexif.ImageIFD.Make] = metadata.photo.cameraMake;
+    if(metadata.photo.cameraMake) exifObj["0th"][piexif.ImageIFD.Make] = metadata.photo.cameraMake;
+    if(metadata.photo.cameraModel) exifObj["0th"][piexif.ImageIFD.Model] = metadata.photo.cameraModel;
+    if(metadata.width) exifObj["0th"][piexif.ImageIFD.ImageWidth] = Number(metadata.width);
+    if(metadata.height) exifObj["0th"][piexif.ImageIFD.ImageLength] = Number(metadata.height);
+    if(metadata.photo.focalLength) exifObj["Exif"][piexif.ExifIFD.FocalLength] = metadata.photo.focalLength;
+    if(metadata.photo.apertureFNumber) exifObj["Exif"][piexif.ExifIFD.FNumber] = metadata.photo.apertureFNumber;
+    if(metadata.photo.isoEquivalent) exifObj["Exif"][piexif.ExifIFD.ISOSpeedRatings] = metadata.photo.isoEquivalent;
+    if(metadata.photo.exposureTime) exifObj["Exif"][piexif.ExifIFD.ExposureTime] = metadata.photo.exposureTime;
     const creationTime = new Date(metadata.creationTime);
     const year = creationTime.getFullYear();
     const month = creationTime.getMonth() < 9 ? `0${creationTime.getMonth()+1}`:str(creationTime.getMonth()+1);
@@ -53,9 +55,8 @@ const insertExif = (metadata,jpeg_data) =>{
     const hour = creationTime.getHours() < 10 ? `0${creationTime.getHours()}`:creationTime.getHours();
     const minute = creationTime.getMinutes() < 10 ? `0${creationTime.getMinutes()}`:creationTime.getMinutes();
     const second = creationTime.getSeconds() < 10 ? `0${creationTime.getSeconds()}`:creationTime.getSeconds();
-    exif[piexif.ExifIFD.DateTimeOriginal] = `${year}:${month}:${date} ${hour}:${minute}:${second}`;
+    exifObj["Exif"][piexif.ExifIFD.DateTimeOriginal] = `${year}:${month}:${date} ${hour}:${minute}:${second}`;
 
-    const exifObj = {"0th":zeroth,"Exif":exif};
     const exifStr = piexif.dump(exifObj);
 
     return new Buffer(piexif.insert(exifStr,jpeg_data.toString('binary')), 'binary');
@@ -96,7 +97,7 @@ const downloadImage = (media_item)=>{
             if(!stat) {
                 //ファイルが存在しなければダウンロード処理を開始する
                 const metadata = media_item.mediaMetadata;
-                const rawdataUrl = `${media_item.baseUrl}=w${metadata.width}-h${metadata.height}`
+                const rawdataUrl = `${media_item.baseUrl}=d`
                 logger.info(`download:${filename} from ${rawdataUrl}`)
 
                 request({url:rawdataUrl,encoding: null,method: 'GET'},(err,res,body)=>{
