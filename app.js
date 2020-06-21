@@ -36,9 +36,6 @@ const config = require('./config');
 // jpeg_data: 対象画像のbufferデータ
 const insertExif = (metadata,jpeg_data) =>{
     const exifObj = piexif.load(jpeg_data.toString('binary'));
-    const zeroth = {};
-    const exif = {};
-    const gps = {};
     if(metadata.photo.cameraMake) exifObj["0th"][piexif.ImageIFD.Make] = metadata.photo.cameraMake;
     if(metadata.photo.cameraMake) exifObj["0th"][piexif.ImageIFD.Make] = metadata.photo.cameraMake;
     if(metadata.photo.cameraModel) exifObj["0th"][piexif.ImageIFD.Model] = metadata.photo.cameraModel;
